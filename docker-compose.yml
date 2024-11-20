@@ -1,0 +1,72 @@
+version: '3.8'
+
+services:
+  zabbix-mysql:
+    image: mysql:8.0
+    container_name: zabbix-mysql
+    command:
+      - mysqld
+      - --default-authentication-plugin=mysql_native_password
+      - --character-set-server=utf8
+      - --collation-server=utf8_bin
+    environment:
+      MYSQL_ROOT_PASSWORD: zabbix_pwd  # Senha do root
+      MYSQL_DATABASE: zabbix           # Banco de dados que será criado
+      MYSQL_USER: zabbix               # Nome do usuário do banco de dados
+      MYSQL_PASSWORD: zabbix_pwd       # Senha do usuário
+    volumes:
+      - ./mysql-data:/var/lib/mysql    # Persistência de dados
+    networks:
+      - zabbix-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-pzabbix_pwd"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  zabbix-server:
+    image: zabbix/zabbix-server-mysql:alpine-6.4-latest
+    container_name: zabbix-server
+    environment:
+      DB_SERVER_HOST: zabbix-mysql
+      MYSQL_DATABASE: zabbix
+      MYSQL_USER: zabbix
+      MYSQL_PASSWORD: zabbix_pwd
+      MYSQL_ROOT_PASSWORD: zabbix_pwd
+      ZBX_DBTLSCONNECT: required
+    ports:
+      - "10051:10051"
+    depends_on:
+      zabbix-mysql:
+        condition: service_healthy
+    networks:
+      - zabbix-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "zabbix-mysql", "-u", "root", "-pzabbix_pwd"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  zabbix-web:
+    image: zabbix/zabbix-web-nginx-mysql:ubuntu-6.4-latest
+    container_name: zabbix-web
+    environment:
+      DB_SERVER_HOST: zabbix-mysql
+      MYSQL_DATABASE: zabbix
+      MYSQL_USER: zabbix
+      MYSQL_PASSWORD: zabbix_pwd
+      ZBX_SERVER_HOST: zabbix-server
+      PHP_TZ: America/Sao_Paulo
+    ports:
+      - "8051:8080"
+    depends_on:
+      - zabbix-server
+    networks:
+      - zabbix-net
+    restart: unless-stopped
+
+networks:
+  zabbix-net:
+    driver: bridge
