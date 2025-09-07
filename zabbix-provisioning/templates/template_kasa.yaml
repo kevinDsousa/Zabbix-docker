@@ -1,0 +1,25 @@
+zabbix_export:
+  version: '7.0'
+  templates:
+    - name: 'Template Kasa Smart Plugs'
+      groups:
+        - name: 'Templates/Network devices'
+      discovery_rules:
+        - name: 'Descoberta de Tomadas Kasa'
+          key: kasa.discover
+          delay: 1h
+          item_prototypes:
+            - name: 'Consumo de Energia - {#PLUGALIAS}'
+              key: 'kasa.p110.power[{#PLUGIP}]'
+              type: NUMERIC_FLOAT
+              units: W
+              delay: 1m
+              history: 7d
+              trends: 365d
+          trigger_prototypes:
+            - name: 'Consumo Alto em {#PLUGALIAS}'
+              expression: 'last(/Template Kasa Smart Plugs/kasa.p110.power[{#PLUGIP}]) > 100'
+              severity: WARNING
+            - name: 'Tomada {#PLUGALIAS} está Offline'
+              expression: 'nodata(/Template Kasa Smart Plugs/kasa.p110.power[{#PLUGIP}],5m) = 1'
+              severity: DISASTER
