@@ -7,7 +7,7 @@ RUN pip install pyzabbix pyyaml
 
 # Copia os arquivos
 COPY ./templates /templates
-COPY ./hosts.yaml . # <--- ADICIONE ESTA LINHA
+COPY ./hosts.yaml .
 COPY ./provisioning.py .
 
 CMD ["python", "provisioning.py"]
