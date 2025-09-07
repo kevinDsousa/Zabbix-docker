@@ -71,8 +71,8 @@ services:
     image: custom-zabbix-agent:latest
     container_name: zabbix-agent
     environment:
-      KASA_USERNAME: "kevindiegodasilvasousa@gmail.com"
-      KASA_PASSWORD: "Ke@226921"
+      KASA_USERNAME: ""
+      KASA_PASSWORD: ""
       ZBX_PASSIVESERVERS: 172.16.0.0/12,127.0.0.1
       ZBX_SERVER_HOST: 172.21.0.1
       ZBX_HOSTNAME: Docker Zabbix Agent
