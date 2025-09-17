@@ -1,3 +1,5 @@
+version: '3.8'
+
 services:
   zabbix-mysql:
     image: mysql:8.0
@@ -21,7 +23,8 @@ services:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-pzabbix_pwd"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 30s
 
   zabbix-server:
     image: zabbix/zabbix-server-mysql:alpine-7.0-latest
@@ -43,12 +46,13 @@ services:
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "zabbix_server", "-V"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
 
   zabbix-web:
-    image: zabbix/zabbix-web-nginx-mysql:ubuntu-7.0-latest 
+    image: zabbix/zabbix-web-nginx-mysql:ubuntu-7.0-latest
     container_name: zabbix-web
     environment:
       DB_SERVER_HOST: zabbix-mysql
@@ -60,7 +64,8 @@ services:
     ports:
       - "8051:8080"
     depends_on:
-      - zabbix-server
+      zabbix-server:
+        condition: service_healthy
     networks:
       - zabbix-net
     restart: unless-stopped
@@ -71,29 +76,42 @@ services:
     image: custom-zabbix-agent:latest
     container_name: zabbix-agent
     environment:
+      ZBX_PASSIVESERVERS: "zabbix-server"
+      ZBX_SERVER_HOST: "zabbix-server"
+      ZBX_HOSTNAME: "Docker Zabbix Agent"
       KASA_USERNAME: ""
       KASA_PASSWORD: ""
-      ZBX_PASSIVESERVERS: 172.16.0.0/12,127.0.0.1
-      ZBX_SERVER_HOST: 172.21.0.1
-      ZBX_HOSTNAME: Docker Zabbix Agent
+    ports:
+      - "10050:10050"
+    networks:
+      - zabbix-net
     restart: unless-stopped
-    network_mode: "host"
 
   zabbix-provisioner:
     build:
       context: ./zabbix-provisioning
     container_name: zabbix-provisioner
     environment:
-      ZABBIX_URL: http://zabbix-server/api_jsonrpc.php
+      ZABBIX_URL: http://zabbix-web:8080/api_jsonrpc.php
       ZABBIX_USER: Admin
       ZABBIX_PASSWORD: zabbix
     networks:
       - zabbix-net
     depends_on:
-      zabbix-server:
-        condition: service_healthy
       zabbix-web:
         condition: service_started
+      zabbix-server:
+        condition: service_healthy
+    restart: "no"  # Executa apenas uma vez
+    # Adiciona um delay para garantir que tudo está pronto
+    command: ["sh", "-c", "sleep 30 && python /app/provisioning.py"]
+    # Adiciona logs para debug
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 networks:
   zabbix-net:
     driver: bridge

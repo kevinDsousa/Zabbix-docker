@@ -24,6 +24,9 @@ docker-compose -f "$CONFIG_FILE" down --volumes
 echo -e "\n${YELLOW}[2/4] Removendo a imagem antiga '$IMAGE_NAME' para evitar cache...${NC}"
 docker rmi $IMAGE_NAME || true
 
+# Removendo a imagem do provisionador para garantir que as mudanças no Dockerfile sejam aplicadas
+docker rmi zabbix-docker-zabbix-provisioner || true
+
 # --- PASSO 3: RECONSTRUÇÃO FORÇADA SEM CACHE ---
 # Separamos o 'build' do 'up' para compatibilidade com a sua versão do docker-compose.
 echo -e "\n${YELLOW}[3/4] Reconstruindo a imagem do agente SEM CACHE...${NC}"

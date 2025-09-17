@@ -1,121 +1,150 @@
-import os
+#!/usr/bin/env python3
+import requests
 import time
-import yaml
-from pyzabbix import ZabbixAPI, ZabbixAPIException
+import re
+from urllib.parse import urljoin
 
-# --- Configurações ---
-ZABBIX_URL = os.environ.get("ZABBIX_URL", "http://zabbix-server/api_jsonrpc.php")
-ZABBIX_USER = os.environ.get("ZABBIX_USER", "Admin")
-ZABBIX_PASSWORD = os.environ.get("ZABBIX_PASSWORD", "zabbix")
-TEMPLATES_DIR = "/templates"
-HOSTS_FILE = "/app/hosts.yaml" # Caminho para o arquivo de hosts dentro do container
+def setup_zabbix_initial_config():
+    """Configura o Zabbix automaticamente via interface web"""
+    
+    base_url = "http://zabbix-web:8080"
+    session = requests.Session()
+    
+    print("=== Configuração Automática do Zabbix ===")
+    
+    # 1. Acessa a página de setup diretamente
+    print("1. Acessando página de setup...")
+    setup_url = urljoin(base_url, "/setup.php")
+    response = session.get(setup_url)
+    
+    # Check for setup page content (case-insensitive)
+    if "welcome to zabbix" in response.text.lower() or "setup.php" in response.url:
+        print("   ✓ Página de setup encontrada")
+        return run_setup_wizard(session, base_url)
+    elif "index.php" in response.url or "dashboard" in response.text:
+        print("   ✓ Zabbix já está configurado!")
+        return True
+    else:
+        print(f"   ⚠️ Resposta inesperada: {response.status_code} de {response.url}. Conteúdo inicial: {response.text[:200]}...") # Added more info
+        return False
 
-def wait_for_zabbix_api(zapi):
-    # (Esta função permanece a mesma)
-    print("Aguardando a API do Zabbix ficar disponível...")
-    for _ in range(30):
+def run_setup_wizard(session, base_url):
+    """Executa o wizard de configuração"""
+    
+    print("2. Executando wizard de configuração...")
+    
+    # Step 1: Welcome
+    print("   → Passo 1: Welcome")
+    response = session.get(f"{base_url}/setup.php")
+    
+    # Step 2: Check requirements
+    print("   → Passo 2: Verificando requisitos")
+    response = session.post(f"{base_url}/setup.php", data={
+        'type': 'step2',
+        'next': 'Next step'
+    })
+    
+    # Step 3: Database configuration
+    print("   → Passo 3: Configuração do banco")
+    db_config = {
+        'type': 'step3',
+        'db_type': 'MYSQL',
+        'db_server': 'zabbix-mysql',
+        'db_port': '3306',
+        'db_database': 'zabbix',
+        'db_user': 'zabbix',
+        'db_password': 'zabbix_pwd',
+        'db_schema': '',
+        'next': 'Next step'
+    }
+    response = session.post(f"{base_url}/setup.php", data=db_config)
+    
+    # Step 4: Zabbix server details
+    print("   → Passo 4: Detalhes do servidor Zabbix")
+    server_config = {
+        'type': 'step4',
+        'zbx_server': 'zabbix-server',
+        'zbx_server_port': '10051',
+        'zbx_server_name': 'Zabbix Docker',
+        'next': 'Next step'
+    }
+    response = session.post(f"{base_url}/setup.php", data=server_config)
+    
+    # Step 5: Pre-installation summary
+    print("   → Passo 5: Resumo da instalação")
+    response = session.post(f"{base_url}/setup.php", data={
+        'type': 'step5',
+        'next': 'Next step'
+    })
+    
+    # Step 6: Installation
+    print("   → Passo 6: Finalizando instalação")
+    response = session.post(f"{base_url}/setup.php", data={
+        'type': 'step6',
+        'save_config': '1',
+        'download': 'Download configuration file',
+        'next': 'Finish'
+    })
+    
+    print("   ✓ Configuração inicial concluída!")
+    return True
+
+def wait_for_web_interface(base_url, max_attempts=20, delay=10):
+    """Aguarda a interface web do Zabbix estar acessível."""
+    print(f"Aguardando a interface web do Zabbix em {base_url} ficar disponível...")
+    for i in range(max_attempts):
         try:
-            zapi.is_available()
-            print("API do Zabbix está pronta.")
-            return True
-        except Exception:
-            time.sleep(10)
-    print("Erro: A API do Zabbix não ficou disponível a tempo.")
+            response = requests.get(base_url, timeout=5)
+            if response.status_code == 200:
+                print("Interface web do Zabbix está acessível.")
+                return True
+        except requests.exceptions.ConnectionError:
+            pass # Connection refused, retry
+        except Exception as e:
+            print(f"Erro inesperado ao verificar a interface web: {e}")
+        
+        print(f"   Tentativa {i + 1}/{max_attempts}: Interface web ainda não disponível. Aguardando {delay} segundos...")
+        time.sleep(delay)
+    print("❌ Falha: Interface web do Zabbix não ficou disponível a tempo.")
     return False
 
-def import_templates(zapi):
-    # (Esta função permanece a mesma)
-    print("\n--- Iniciando importação de Templates ---")
-    import_rules = {
-        'templates': {'createMissing': True, 'updateExisting': True},
-        'templateLinkage': {'createMissing': True},
-        'items': {'createMissing': True, 'updateExisting': True},
-        'triggers': {'createMissing': True, 'updateExisting': True},
-        'discoveryRules': {'createMissing': True, 'updateExisting': True}
-    }
-    template_path = os.path.join(TEMPLATES_DIR, "template_kasa.yaml")
-    try:
-        with open(template_path, 'r') as f:
-            template_content = f.read()
-            zapi.configuration.import_(format='yaml', source=template_content, rules=import_rules)
-            print(f"Template '{template_path}' importado com sucesso.")
-    except Exception as e:
-        print(f"Erro ao importar o template '{template_path}': {e}")
-
-def provision_hosts(zapi):
-    """Lê o arquivo hosts.yaml e cria os hosts que não existem."""
-    print("\n--- Iniciando provisionamento de Hosts ---")
-    try:
-        with open(HOSTS_FILE, 'r') as f:
-            config = yaml.safe_load(f)
-            hosts_to_create = config.get('hosts', [])
-    except FileNotFoundError:
-        print(f"Arquivo de hosts '{HOSTS_FILE}' não encontrado. Pulando criação de hosts.")
-        return
-
-    for host_data in hosts_to_create:
-        host_name = host_data['host']
-        print(f"Verificando host: '{host_name}'...")
-
-        # Verifica se o host já existe
-        if zapi.host.get(filter={'host': host_name}):
-            print(f"Host '{host_name}' já existe. Pulando.")
-            continue
-
-        # Se não existe, vamos criá-lo
-        try:
-            # Pega os IDs dos grupos
-            group_names = host_data['groups']
-            group_ids = [g['groupid'] for g in zapi.hostgroup.get(filter={'name': group_names})]
-            if not group_ids:
-                print(f"AVISO: Nenhum grupo encontrado para '{host_name}'. Verifique os nomes dos grupos.")
-                continue
-
-            # Pega os IDs dos templates
-            template_names = host_data['templates']
-            template_ids = [t['templateid'] for t in zapi.template.get(filter={'name': template_names})]
-            if not template_ids:
-                print(f"AVISO: Nenhum template encontrado para '{host_name}'. Verifique os nomes dos templates.")
-                continue
-
-            # Cria o host
-            zapi.host.create(
-                host=host_name,
-                name=host_data['name'],
-                interfaces=[{
-                    'type': 1, # 1 = Zabbix Agent
-                    'main': 1,
-                    'useip': 1,
-                    'ip': host_data['ip'],
-                    'dns': '',
-                    'port': '10050'
-                }],
-                groups=[{'groupid': gid} for gid in group_ids],
-                templates=[{'templateid': tid} for tid in template_ids]
-            )
-            print(f"Host '{host_name}' criado com sucesso!")
-
-        except Exception as e:
-            print(f"Erro ao criar o host '{host_name}': {e}")
-
-def main():
-    zapi = ZabbixAPI(ZABBIX_URL)
-    if not wait_for_zabbix_api(zapi):
-        return
-
-    try:
-        zapi.login(ZABBIX_USER, ZABBIX_PASSWORD)
-        print(f"Login na API do Zabbix ({ZABBIX_URL}) realizado com sucesso.")
-    except ZabbixAPIException as e:
-        print(f"Falha no login da API do Zabbix: {e}")
-        return
-
-    # Executa as tarefas
-    import_templates(zapi)
-    provision_hosts(zapi)
+def wait_and_setup_zabbix(max_attempts=10):
+    """Aguarda o Zabbix estar disponível e executa a configuração"""
     
-    zapi.user.logout()
-    print("\nLogout da API realizado. Provisionamento concluído.")
+    base_url = "http://zabbix-web:8080" # Define base_url here for wait_for_web_interface
+    if not wait_for_web_interface(base_url):
+        return False
+
+    for attempt in range(max_attempts):
+        print(f"\nTentativa {attempt + 1}/{max_attempts} (Configuração)")
+        
+        try:
+            if setup_zabbix_initial_config():
+                print("✅ Zabbix configurado com sucesso!")
+                return True
+        except Exception as e:
+            print(f"   ✗ Erro durante a configuração: {e}")
+        
+        if attempt < max_attempts - 1:
+            print("   Aguardando 30 segundos antes de re-tentar a configuração...")
+            time.sleep(30)
+    
+    print("❌ Falha na configuração automática do Zabbix")
+    return False
+
 
 if __name__ == "__main__":
-    main()
+    if wait_and_setup_zabbix():
+        print("\n🎉 Zabbix está pronto! Executando provisionamento...")
+        
+        # Agora executa o provisionamento
+        try:
+            from provisioning import main as provision_main
+            exit(provision_main())
+        except Exception as e:
+            print(f"Erro no provisionamento: {e}")
+            exit(1)
+    else:
+        print("\n💥 Configuração automática falhou.")
+        print("Configure manualmente em: http://localhost:8051")
+        exit(1)

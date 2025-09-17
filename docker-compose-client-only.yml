@@ -1,0 +1,33 @@
+services:
+  zabbix-agent:
+    build:
+      context: ./custom-zabbix-agent
+    image: custom-zabbix-agent:latest
+    container_name: zabbix-agent
+    environment:
+      ZBX_PASSIVESERVERS: "${ZABBIX_SERVER_HOST}"
+      ZBX_SERVER_HOST: "${ZABBIX_SERVER_HOST}"
+      ZBX_HOSTNAME: "${ZABBIX_AGENT_HOSTNAME:-Docker Zabbix Agent}"
+      KASA_USERNAME: "${KASA_USERNAME}"
+      KASA_PASSWORD: "${KASA_PASSWORD}"
+    ports:
+      - "10050:10050"
+    networks:
+      - zabbix-net
+    restart: unless-stopped
+
+  zabbix-provisioner:
+    build:
+      context: ./zabbix-provisioning
+    container_name: zabbix-provisioner
+    environment:
+      ZABBIX_URL: "${ZABBIX_URL}"
+      ZABBIX_USER: "${ZABBIX_USER}"
+      ZABBIX_PASSWORD: "${ZABBIX_PASSWORD}"
+    networks:
+      - zabbix-net
+    restart: on-failure # Changed to on-failure as there's no server to depend on locally
+
+networks:
+  zabbix-net:
+    driver: bridge

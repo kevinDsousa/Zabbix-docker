@@ -1,10 +1,21 @@
 hosts:
   - host: 'Docker Zabbix Agent'
     name: 'Docker Zabbix Agent'
-    ip: '172.21.0.1'
+    ip: '100.111.249.88'
     groups:
       - 'Linux servers'
       - 'Docker'
     templates:
       - 'Template Kasa Smart Plugs'
       - 'Linux by Zabbix agent'
+  - host: 'box-test'
+    name: 'box-test'
+    ip: '100.64.178.59'
+    groups:
+      - 'Linux servers'
+      - 'Docker'
+      - 'Box'
+    templates:
+      - 'Template Kasa Smart Plugs'
+      - 'Linux by Zabbix agent'
+
